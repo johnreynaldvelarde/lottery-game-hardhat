@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-
 contract Lottery {
     address public owner;
     uint public entryFee = 0.01 ether;
@@ -17,6 +16,11 @@ contract Lottery {
     Entry[] public entries;
     mapping(address => bool) public hasEntered;
 
+    event LotteryEntered(address indexed player, uint guess);
+    event WinningNumberDrawn(uint number);
+    event LotteryReset();
+    event FundsWithdrawn(address indexed to, uint amount);
+
     modifier onlyOwner() {
         require(msg.sender == owner, "Not owner");
         _;
@@ -26,14 +30,19 @@ contract Lottery {
         owner = msg.sender;
     }
 
-    function enterLottery(uint guess) public payable {
+    function enterLottery(uint[] memory guesses) public payable {
         require(isLotteryOpen, "Lottery closed");
         require(!hasEntered[msg.sender], "Already entered");
         require(msg.value == entryFee, "Incorrect entry fee");
-        require(guess >= 100000 && guess <= 999999, "Must be 6 digits");
+        require(guesses.length == 6, "Must be 6 numbers");
 
-        entries.push(Entry(msg.sender, guess));
+        // Encode guesses into a single number or store the array as-is if needed
+        uint guessHash = uint(keccak256(abi.encodePacked(guesses)));
+
+        entries.push(Entry(msg.sender, guessHash));
         hasEntered[msg.sender] = true;
+
+        emit LotteryEntered(msg.sender, guessHash);
     }
 
     function drawWinningNumber(uint _number) public onlyOwner {
@@ -43,10 +52,13 @@ contract Lottery {
         winningNumber = _number;
         isLotteryOpen = false;
         isWinnerDrawn = true;
+
+        emit WinningNumberDrawn(_number);
     }
 
     function getWinners() public view returns (address[] memory) {
         require(isWinnerDrawn, "Not drawn yet");
+
         uint count = 0;
         for (uint i = 0; i < entries.length; i++) {
             if (entries[i].guess == winningNumber) {
@@ -65,8 +77,26 @@ contract Lottery {
         return winners;
     }
 
+    function resetLottery() public onlyOwner {
+        // Reset participation mapping before deleting entries
+        for (uint i = 0; i < entries.length; i++) {
+            hasEntered[entries[i].player] = false;
+        }
+
+        delete entries;
+        isLotteryOpen = true;
+        isWinnerDrawn = false;
+        winningNumber = 0;
+
+        emit LotteryReset();
+    }
+
     function withdrawFunds() public onlyOwner {
-        payable(owner).transfer(address(this).balance);
+        uint balance = address(this).balance;
+        require(balance > 0, "Nothing to withdraw");
+        payable(owner).transfer(balance);
+
+        emit FundsWithdrawn(owner, balance);
     }
 
     function totalPlayers() public view returns (uint) {
